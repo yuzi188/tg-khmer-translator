@@ -1,3 +1,3 @@
 python-telegram-bot==21.6
 openai==1.58.1
-pydub==0.25.1
+langdetect==1.0.9

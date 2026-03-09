@@ -1,6 +1,10 @@
 """
-Telegram 高棉語-中文翻譯 Bot 主程式
-支援文字翻譯、語音翻譯、廚房字典
+Telegram 高棉語-中文翻譯 Bot
+- 群組所有訊息自動偵測語言並翻譯（不需指令觸發）
+- 高棉語 → 中文
+- 中文   → 高棉語
+- 英文   → 中文
+- 一律用 reply message 方式回覆，不洗版
 """
 
 import logging
@@ -20,200 +24,161 @@ from translator import translate_message, format_translation
 from speech import process_voice_message, format_voice_translation
 from dictionary import get_dictionary_stats
 
-# ──────────────────────────────────────────────
-# Logging 設定
-# ──────────────────────────────────────────────
+# ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
-
-# 降低 httpx 的日誌等級
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
-# ──────────────────────────────────────────────
-# 環境變數
-# ──────────────────────────────────────────────
+# ── 環境變數 ──────────────────────────────────────────────────────────────────
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN 環境變數未設定")
 
 
-# ──────────────────────────────────────────────
-# 指令處理器
-# ──────────────────────────────────────────────
+# ── 指令處理器 ────────────────────────────────────────────────────────────────
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """處理 /start 指令"""
     stats = get_dictionary_stats()
-    welcome_message = (
+    await update.message.reply_text(
         "🌐 <b>高棉語-中文翻譯 Bot</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "👋 歡迎使用翻譯 Bot！\n\n"
-        "📝 <b>功能說明：</b>\n"
-        "• 自動偵測語言並翻譯\n"
-        "• 高棉語 🇰🇭 ↔ 中文 🇨🇳 互譯\n"
-        "• 英文 🇬🇧 → 中文 + 高棉語\n"
-        "• 語音訊息自動辨識翻譯 🎤\n"
-        f"• 內建廚房字典（{stats['total_pairs']} 組詞彙）📖\n\n"
-        "📌 <b>使用方式：</b>\n"
-        "直接傳送文字或語音訊息即可自動翻譯\n\n"
-        "⌨️ <b>指令列表：</b>\n"
-        "/start - 顯示 Bot 說明\n"
-        "/help - 顯示使用方式\n"
-        "/language - 設定翻譯語言\n"
+        "📝 <b>自動翻譯規則：</b>\n"
+        "🇰🇭 高棉語 → 🇨🇳 中文\n"
+        "🇨🇳 中文   → 🇰🇭 高棉語\n"
+        "🇬🇧 英文   → 🇨🇳 中文\n\n"
+        "🎤 語音訊息自動辨識並翻譯\n"
+        f"📖 內建廚房字典（{stats['total_pairs']} 組詞彙）\n\n"
+        "直接傳送訊息即可，Bot 會自動以 reply 方式回覆翻譯結果。\n\n"
+        "⌨️ /help - 使用說明　/language - 語言資訊",
+        parse_mode="HTML",
     )
-    await update.message.reply_text(welcome_message, parse_mode="HTML")
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """處理 /help 指令"""
-    help_message = (
+    await update.message.reply_text(
         "📖 <b>使用說明</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         "1️⃣ <b>文字翻譯</b>\n"
-        "直接傳送文字訊息，Bot 會自動偵測語言並翻譯：\n"
-        "• 高棉語 → 中文\n"
-        "• 中文 → 高棉語\n"
-        "• 英文 → 中文 + 高棉語\n\n"
+        "直接傳送任何文字，Bot 自動偵測語言並翻譯：\n"
+        "• 高棉語 🇰🇭 → 中文 🇨🇳\n"
+        "• 中文 🇨🇳 → 高棉語 🇰🇭\n"
+        "• 英文 🇬🇧 → 中文 🇨🇳\n\n"
         "2️⃣ <b>語音翻譯</b>\n"
-        "傳送語音訊息，Bot 會：\n"
-        "• 自動辨識語音內容\n"
-        "• 翻譯成對應語言\n\n"
+        "傳送語音訊息，Bot 自動辨識並翻譯。\n\n"
         "3️⃣ <b>廚房字典</b>\n"
-        "常用廚房詞彙會優先使用內建字典翻譯，\n"
-        "速度更快、更準確。\n\n"
-        "💡 <b>提示：</b>\n"
-        "• 在群組中使用時，Bot 會以 reply 方式回覆\n"
-        "• 支援私聊和群組使用\n"
+        "常用詞彙優先查字典，速度更快更準確。\n\n"
+        "💡 所有回覆均以 reply 方式，不會洗版。",
+        parse_mode="HTML",
     )
-    await update.message.reply_text(help_message, parse_mode="HTML")
 
 
 async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """處理 /language 指令"""
-    language_message = (
-        "🌍 <b>翻譯語言設定</b>\n"
+    await update.message.reply_text(
+        "🌍 <b>翻譯語言資訊</b>\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "目前支援的翻譯方向：\n\n"
-        "🇰🇭 高棉語 (Khmer) → 🇨🇳 中文\n"
-        "🇨🇳 中文 → 🇰🇭 高棉語 (Khmer)\n"
-        "🇬🇧 英文 (English) → 🇨🇳 中文 + 🇰🇭 高棉語\n\n"
-        "💡 Bot 會自動偵測您的訊息語言，\n"
-        "無需手動設定！直接傳送訊息即可。"
+        "🇰🇭 高棉語 → 🇨🇳 中文\n"
+        "🇨🇳 中文   → 🇰🇭 高棉語\n"
+        "🇬🇧 英文   → 🇨🇳 中文\n\n"
+        "Bot 自動偵測語言，無需手動設定。",
+        parse_mode="HTML",
     )
-    await update.message.reply_text(language_message, parse_mode="HTML")
 
 
-# ──────────────────────────────────────────────
-# 訊息處理器
-# ──────────────────────────────────────────────
-async def handle_text_message(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    """處理文字訊息 - 自動翻譯"""
-    if not update.message or not update.message.text:
+# ── 訊息處理器 ────────────────────────────────────────────────────────────────
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    群組 / 私聊所有文字訊息自動翻譯。
+    一律用 reply_text 回覆原訊息，不洗版。
+    """
+    msg = update.message
+    if not msg or not msg.text:
         return
 
-    text = update.message.text.strip()
-
-    # 忽略指令
-    if text.startswith("/"):
+    text = msg.text.strip()
+    if not text:
         return
 
-    # 忽略太短的訊息
-    if len(text) < 1:
-        return
+    logger.info("收到訊息 [chat_id=%s]: %.60s", msg.chat_id, text)
 
     try:
         result = await translate_message(text)
         if result:
-            source_lang, original, translated = result
-            response = format_translation(source_lang, original, translated)
-            # 使用 reply 方式回覆，避免洗版
-            await update.message.reply_text(response)
+            src, original, translated = result
+            reply = format_translation(src, original, translated)
+            await msg.reply_text(reply)
         else:
-            logger.warning(f"無法翻譯訊息: {text[:50]}")
+            logger.info("無法判斷語言，略過: %.50s", text)
     except Exception as e:
-        logger.error(f"翻譯處理錯誤: {e}")
-        await update.message.reply_text("⚠️ 翻譯失敗，請稍後再試。")
+        logger.error("翻譯失敗: %s", e)
+        await msg.reply_text("⚠️ 翻譯失敗，請稍後再試。")
 
 
-async def handle_voice_message(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    """處理語音訊息 - 語音辨識 + 翻譯"""
-    if not update.message or not update.message.voice:
+async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    語音訊息：下載 .ogg → Whisper 辨識 → 翻譯 → reply 回覆。
+    """
+    msg = update.message
+    if not msg or not msg.voice:
         return
 
-    # 傳送處理中提示
-    processing_msg = await update.message.reply_text("🔄 正在處理語音訊息...")
-
+    processing = await msg.reply_text("🔄 正在處理語音...")
     ogg_path = None
+
     try:
-        # 1. 下載語音檔案
-        voice = update.message.voice
-        voice_file = await context.bot.get_file(voice.file_id)
-
-        # 建立暫存檔案
-        ogg_path = os.path.join(tempfile.gettempdir(), f"{voice.file_id}.ogg")
+        # 下載語音檔（.ogg）
+        voice_file = await context.bot.get_file(msg.voice.file_id)
+        ogg_path = os.path.join(tempfile.gettempdir(), f"{msg.voice.file_id}.ogg")
         await voice_file.download_to_drive(ogg_path)
-        logger.info(f"語音檔案已下載: {ogg_path}")
+        logger.info("語音下載完成: %s", ogg_path)
 
-        # 2. 處理語音（辨識 + 翻譯）
+        # 辨識 + 翻譯
         result = await process_voice_message(ogg_path)
-
         if result:
-            source_lang, recognized, translated = result
-            response = format_voice_translation(source_lang, recognized, translated)
+            src, recognized, translated = result
+            reply = format_voice_translation(src, recognized, translated)
         else:
-            response = "⚠️ 無法辨識語音內容，請重新錄製。"
+            reply = "⚠️ 無法辨識語音內容，請重新錄製。"
 
-        # 3. 更新回覆訊息
-        await processing_msg.edit_text(response)
+        await processing.edit_text(reply)
 
     except Exception as e:
-        logger.error(f"語音處理錯誤: {e}")
-        await processing_msg.edit_text("⚠️ 語音處理失敗，請稍後再試。")
+        logger.error("語音處理錯誤: %s", e)
+        await processing.edit_text("⚠️ 語音處理失敗，請稍後再試。")
 
 
-# ──────────────────────────────────────────────
-# 錯誤處理
-# ──────────────────────────────────────────────
+# ── 錯誤處理 ──────────────────────────────────────────────────────────────────
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """全域錯誤處理器"""
-    logger.error(f"Update {update} caused error: {context.error}")
+    logger.error("Update %s 發生錯誤: %s", update, context.error)
 
 
-# ──────────────────────────────────────────────
-# 主程式
-# ──────────────────────────────────────────────
+# ── 主程式 ────────────────────────────────────────────────────────────────────
+
 def main() -> None:
-    """啟動 Bot"""
-    logger.info("正在啟動翻譯 Bot...")
+    logger.info("啟動翻譯 Bot...")
 
-    # 建立 Application
-    application = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(BOT_TOKEN).build()
 
-    # 註冊指令處理器
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("language", language_command))
+    # 指令
+    app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("language", language_command))
 
-    # 註冊訊息處理器
-    application.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message)
-    )
-    application.add_handler(
-        MessageHandler(filters.VOICE, handle_voice_message)
-    )
+    # 文字訊息（群組 + 私聊，排除指令）
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    # 註冊錯誤處理器
-    application.add_error_handler(error_handler)
+    # 語音訊息
+    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 
-    # 啟動 Bot（使用 polling 模式）
-    logger.info("Bot 已啟動，開始接收訊息...")
-    application.run_polling(
+    # 錯誤處理
+    app.add_error_handler(error_handler)
+
+    logger.info("Bot 開始 polling...")
+    app.run_polling(
         allowed_updates=Update.ALL_TYPES,
         drop_pending_updates=True,
     )
